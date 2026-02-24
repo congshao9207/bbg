@@ -1,0 +1,1 @@
+docker build -t magfin_python_base:0.0.1 .

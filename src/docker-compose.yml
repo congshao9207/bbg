@@ -1,0 +1,17 @@
+version: '2'
+services:
+  trans_parser:
+    build:
+        context: ./
+        dockerfile: Dockerfile
+    container_name: trans_parser
+    image: trans_parser:0.0.1
+    environment:
+      - DB_HOST=192.168.4.188
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PWD=ysyhl9t!
+      - DB_NAME=trans_parser
+      - EUREKA_SERVER=http://192.168.1.27:8030/eureka/
+    ports:
+      - "8011:8011"
