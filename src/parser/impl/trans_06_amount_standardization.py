@@ -1,8 +1,8 @@
 
-from config.trans_config import INCOME_PATTERN, OUTCOME_PATTERN
+from src.config.trans_config import INCOME_PATTERN, OUTCOME_PATTERN
 import re
 
-from parser.task_base_executor import TaskBaseExecutor
+from src.parser.task_base_executor import TaskBaseExecutor
 
 
 class TransAmountStandardization(TaskBaseExecutor):
@@ -15,6 +15,14 @@ class TransAmountStandardization(TaskBaseExecutor):
     updated_time_v2:20201223,将所有正则匹配格式都纳入配置文件
     updated_time_v3:20220420,新增智能删除及智能纠偏功能
     """
+    # 预编译正则表达式
+    INCOME_PAT = re.compile(INCOME_PATTERN)
+    OUTCOME_PAT = re.compile(OUTCOME_PATTERN)
+    USE_CLEAN_PAT = re.compile(r'[\\\"\'\s^-]')  # 交易用途清理
+    WHITESPACE_PAT = re.compile(r'\s')
+    OTHER_CATEGORY_PAT = re.compile(r'(其他|其它|不计收支)')
+    COLUMN_CLEAN_PAT = re.compile(r'[(（\\\/]')  # 列名清理
+    DIGIT_PAIR_PAT = re.compile(r'(12|21)')  # 数字对匹配
 
     def __init__(self):
         super().__init__()
@@ -25,11 +33,12 @@ class TransAmountStandardization(TaskBaseExecutor):
     def _trans_use(self):
         type_col = self.col_mapping()['use_col']
         if len(type_col):
-            string = ''
+            # 向量化优化：避免eval和apply
+            self.df['trans_use'] = ''
             for col in type_col:
-                string += "self.df['" + col + "'].fillna('').astype(str)+"
-            string = string[:-1]
-            self.df['trans_use'] = eval(string).apply(lambda x: re.sub(r'[\\\"\'\s^-]', '', x))
+                self.df['trans_use'] += self.df[col].fillna('').astype(str)
+            # 使用str.replace进行向量化清理
+            self.df['trans_use'] = self.df['trans_use'].str.replace(self.USE_CLEAN_PAT, '', regex=True)
         else:
             self.df['trans_use'] = ''
 
@@ -41,15 +50,15 @@ class TransAmountStandardization(TaskBaseExecutor):
         length = len(self.amt_col)
         for index in range(-length, 0):
             col = self.amt_col[index]
-            temp = self.df[col].apply(lambda x: re.sub(r'\s', '', str(x))).value_counts()
+            temp = self.df[col].astype(str).str.replace(self.WHITESPACE_PAT, '', regex=True).value_counts()
             index = ''.join([str(_) for _ in temp.index])
-            if len(temp) in [2, 3] and (re.search(INCOME_PATTERN, index) or re.search(OUTCOME_PATTERN, index) or
-                                        re.search('(12|21)', index)):
+            if len(temp) in [2, 3] and (self.INCOME_PAT.search(index) or self.OUTCOME_PAT.search(index) or
+                                        self.DIGIT_PAIR_PAT.search(index)):
                 tag = col
                 # self.df['tag'] = self.df[tag].astype(str).apply(lambda x: re.sub(OUTCOME_FULL_PATTERN, '1', x)).\
                 #     apply(lambda x: 1 if x != '1' else -1)
                 self.df['tag'] = self.df[tag].astype(str).apply(
-                    lambda x: -1 if re.search(OUTCOME_PATTERN, x) else 0 if re.search('(其他|其它|不计收支)', x) else 1)
+                    lambda x: -1 if self.OUTCOME_PAT.search(x) else 0 if self.OTHER_CATEGORY_PAT.search(x) else 1)
                 # 微信支付宝流水其它里面的信用卡还款作为出账
                 # if self.parse_context.parse_task.trans_flow_src_type in [2, 3]:
                 #     self.df.loc[(self.df['tag'] == 0) & (self.df.trans_use.str.contains('信用卡还款')), 'tag'] = -1
@@ -58,7 +67,7 @@ class TransAmountStandardization(TaskBaseExecutor):
                     self.df.loc[(self.df['tag'] == 0) & (self.df.trans_use.str.contains('零钱充值|转入零钱通')), 'tag'] = 1
                     self.df.loc[self.df.trans_use.str.contains('转入零钱通来自零钱|零钱通转出到零钱'), 'tag'] = 0
                 self.df['verif_label'] = self.df[tag].astype(str).apply(
-                    lambda x: '' if re.search(OUTCOME_PATTERN, x) or re.search(INCOME_PATTERN, x) else 'T99')
+                    lambda x: '' if self.OUTCOME_PAT.search(x) or self.INCOME_PAT.search(x) else 'T99')
 
                 self.amt_col.remove(col)
                 return 1
@@ -77,25 +86,28 @@ class TransAmountStandardization(TaskBaseExecutor):
         income_cnt, outcome_cnt, amt_cnt, tbd_cnt = 0, 0, 0, 0
         for index in range(-length, 0):
             col = self.amt_col[index]
-            col1 = re.sub(r'[(（\\\/]', ' ', col)
+            col1 = self.COLUMN_CLEAN_PAT.sub(' ', col)
             col_list = col1.split(maxsplit=2)
             if len(col_list) == 2 and \
-                    ((re.search(INCOME_PATTERN, col_list[0]) and re.search(OUTCOME_PATTERN, col_list[1])) or
-                     (re.search(INCOME_PATTERN, col_list[1]) and re.search(OUTCOME_PATTERN, col_list[0]))):
+                    ((self.INCOME_PAT.search(col_list[0]) and self.OUTCOME_PAT.search(col_list[1])) or
+                     (self.INCOME_PAT.search(col_list[1]) and self.OUTCOME_PAT.search(col_list[0]))):
                 col1 = col_list[1]
             else:
                 col1 = col
+            # ========== 性能优化：使用向量化方法替代逐行apply ==========
+            # 原代码：self.df[col] = self.df[col].apply(self.value_trans)
             # 将每个金额列数据类型都替换为字符串,先将字符串中的空格都替换为空,再将字符串中的非数字小数点负号替换为空,或者以负号结尾的数据替换为空
-            self.df[col] = self.df[col].apply(self.value_trans)
+            self.df[col] = self.value_trans_vectorized(self.df[col])
+            # ========== 性能优化结束 ==========
             temp_cnt = self.df[self.df[col] != 0].shape[0]
-            if re.search(INCOME_PATTERN, col1) and re.search(OUTCOME_PATTERN, col1):
+            if self.INCOME_PAT.search(col1) and self.OUTCOME_PAT.search(col1):
                 if temp_cnt - self.df.shape[0] * 0.5 > 0 and temp_cnt > amt_cnt:
                     col_map['amt_index'], amt_cnt = index, temp_cnt
                 elif temp_cnt > tbd_cnt:
                     col_map['tbd_index'], tbd_cnt = index, temp_cnt
-            elif re.search(INCOME_PATTERN, col1) and temp_cnt > income_cnt:
+            elif self.INCOME_PAT.search(col1) and temp_cnt > income_cnt:
                 col_map['income_index'], income_cnt = index, temp_cnt
-            elif re.search(OUTCOME_PATTERN, col1) and temp_cnt > outcome_cnt:
+            elif self.OUTCOME_PAT.search(col1) and temp_cnt > outcome_cnt:
                 col_map['outcome_index'], outcome_cnt = index, temp_cnt
             elif temp_cnt > amt_cnt:
                 col_map['amt_index'], amt_cnt = index, temp_cnt
@@ -123,10 +135,13 @@ class TransAmountStandardization(TaskBaseExecutor):
         :return:
         """
         if not self.tag:
-            self.df['tag'] = -1 if re.search(OUTCOME_PATTERN, col) and not re.search(INCOME_PATTERN, col) else 1
+            self.df['tag'] = -1 if self.OUTCOME_PAT.search(col) and not self.INCOME_PAT.search(col) else 1
         if self.df[self.df['tag'] == -1][col].sum() < 0:
             self.df['tag'] = 1
-        self.df[col_name] = self.df.apply(lambda x: self.value_trans(x[col]) * x['tag'], axis=1)
+        # ========== 性能优化：使用向量化方法 ==========
+        # 原代码：self.df[col_name] = self.df.apply(lambda x: self.value_trans(x[col]) * x['tag'], axis=1)
+        self.df[col_name] = self.value_trans_vectorized(self.df[col]) * self.df['tag']
+        # ========== 性能优化结束 ==========
         self.df = self.df[self.df[col_name] != 0]
         return
 
@@ -135,8 +150,11 @@ class TransAmountStandardization(TaskBaseExecutor):
         交易金额列存在多列时的处理
         :return:
         """
+        # ========== 性能优化：使用向量化方法批量处理 ==========
+        # 原代码：for col in self.amt_col: self.df[col] = self.df[col].apply(self.value_trans)
         for col in self.amt_col:
-            self.df[col] = self.df[col].apply(self.value_trans)
+            self.df[col] = self.value_trans_vectorized(self.df[col])
+        # ========== 性能优化结束 ==========
         length = len(self.amt_col)
         if length == 1:
             if self.tag:

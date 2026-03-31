@@ -20,7 +20,13 @@ EUREKA_SERVER = os.getenv('EUREKA_SERVER', 'http://61.128.28.103:8761/eureka/')
 SPEC_OPT_TOKEN = os.getenv('SPEC_OPT_TOKEN', "X5ZSAvPLt8C2f3zS5Rw7QZKPbzGFai7i")
 DAFE_SERVER = os.getenv('DAFE_SERVER', 'http://61.128.2.93:22530/apigw/appinfo/register')
 
-MAX_WORKERS = 2
+# ========== 性能优化：增加工作线程数 ==========
+# 原配置：MAX_WORKERS = 2
+# 优化说明：根据CPU核心数动态调整，提升并发处理能力
+import multiprocessing
+MAX_WORKERS = min(8, max(2, multiprocessing.cpu_count() - 1))  # 最少2个，最多8个，预留1个核心给系统
+# ========== 性能优化结束 ==========
+
 WAITING_INTERVAL = 3
 PARSE_TASK_TIMEOUT_MINUTES = 30
 
@@ -44,7 +50,7 @@ TRANS_AMT_PATTERN = \
 # 交易余额关键字
 TRANS_BAL_PATTERN = r'(?<!最[小大])([余全]额|[Bb]alance)'
 # 交易对手关键字
-TRANS_OPNAME_PATTERN = r"(?<!本.)(户名|方名称|姓名|单位名称|对方单位|公司名|对手名称|人名称|账号名称|对方$|对[手方]信息)(?!备注)"
+TRANS_OPNAME_PATTERN = r"(?<!本.)(户名|方名称|姓名|单位名称|对方单位|公司名|对手名称|人名称|账号名称|对方$|对[手方]信息)(?!备注)|对手|对手方"
 # 币种关键字
 TRANS_CUR_PATTERN = r'(币[种别]|货币|[Cc]urrency)'
 # 交易对手姓名关键字

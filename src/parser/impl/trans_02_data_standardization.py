@@ -2,9 +2,9 @@ import re
 
 import pandas as pd
 
-from config.trans_config import DTTIME_PATTERN, DATE_PATTERN, AMT_PATTERN, IGNORE_PATTERN, \
+from src.config.trans_config import DTTIME_PATTERN, DATE_PATTERN, AMT_PATTERN, IGNORE_PATTERN, \
     INCOME_PATTERN, OUTCOME_PATTERN, SHORT_DATE_PATTERN
-from parser.task_base_executor import TaskBaseExecutor
+from src.parser.task_base_executor import TaskBaseExecutor
 
 
 class TransDataStandardization(TaskBaseExecutor):
@@ -27,9 +27,16 @@ class TransDataStandardization(TaskBaseExecutor):
         df = self.trans_data
         col_list = list(df.columns)
         for col_index in range(len(col_list)):
+            target_col_index = col_index + 1
             if '发生额' == col_list[col_index] or '发生额元' == col_list[col_index]:
                 c1 = str(df.iloc[0, col_index]).strip()
-                c2 = str(df.iloc[0, col_index + 1]).strip()
+                # c2 = str(df.iloc[0, col_index + 1]).strip()
+                # 安全检查：确保索引在有效范围内 (0 到 total_cols-1)
+                if target_col_index <= len(col_list) - 1:
+                    c2 = str(df.iloc[0, target_col_index]).strip()
+                else:
+                    # 如果索引越界，给 c2 一个默认值（如空字符串）或处理异常逻辑
+                    c2 = ""
                 if (re.search(OUTCOME_PATTERN, c1) and re.search(INCOME_PATTERN, c2)) or \
                         (re.search(OUTCOME_PATTERN, c2) and re.search(INCOME_PATTERN, c1)):
                     df.rename(columns={col_list[col_index]: c1, col_list[col_index+1]: c2}, inplace=True)

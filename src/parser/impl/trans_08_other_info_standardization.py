@@ -1,7 +1,7 @@
 import re
 import pandas as pd
 
-from parser.task_base_executor import TaskBaseExecutor
+from src.parser.task_base_executor import TaskBaseExecutor
 
 
 def str_transfer(ustring):

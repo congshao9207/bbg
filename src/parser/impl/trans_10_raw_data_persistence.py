@@ -26,55 +26,110 @@ class TransFlowRawData(TaskBaseExecutor):
         self.raw_list = []
         self.create_time = datetime.datetime.strftime(datetime.datetime.now(), '%Y-%m-%d %H:%M:%S')
 
+    # def _mark_duplicate_data(self):
+    #     sql = """select * from trans_flow where account_id in (select id from trans_account where account_name='%s'
+    #         and id_card_no='%s' and account_no='%s' and bank='%s' and task_no='%s' and create_time > date_sub(now(), interval %d month))
+    #         and repeated = 0 order by id desc""" % \
+    #           (self.param.get('cusName'), self.param.get('idNo'), self.param.get('bankAccount'),
+    #            self.param.get('bankName'), self.param.get('taskNo'), MONTH_LIMIT)
+    #     df = sql_to_df(sql)
+    #     # 重复标签打上默认值
+    #     data = self.trans_data
+    #     data['repeated'] = 0
+    #     if df.shape[0] == 0:
+    #         return data
+    #     df['trans_time'] = pd.to_datetime(df['trans_time'])
+    #     df['trans_date'] = df['trans_time'].apply(lambda x: x.date())
+    #     data['trans_date'] = data['trans_time'].apply(lambda x: x.date())
+    #     full_date_list = df.groupby('account_id')['trans_date'].agg({'min', 'max'})[['min', 'max']].values.tolist()
+    #     merge_date_list = self.interval_merge(full_date_list)
+    #     not_full_date_list = []
+    #     full_date_string = "data[(data['trans_date'] < pd.to_datetime('%s').date()) | " % \
+    #                        format(merge_date_list[0][0], '%Y-%m-%d')
+    #     for i in range(len(merge_date_list) - 1):
+    #         not_full_date_list.extend(merge_date_list[i])
+    #         temp_str = "((data['trans_date'] > pd.to_datetime('%s').date()) & " \
+    #                    "(data['trans_date'] < pd.to_datetime('%s').date())) | " % \
+    #                    (format(merge_date_list[i][1], '%Y-%m-%d'), format(merge_date_list[i + 1][0], '%Y-%m-%d'))
+    #         full_date_string += temp_str
+    #     full_date_string += "(data['trans_date'] > pd.to_datetime('%s').date())]" % \
+    #                         format(merge_date_list[-1][-1], '%Y-%m-%d')
+    #     not_full_date_list.extend(merge_date_list[-1])
+    #     full_date_df = eval(full_date_string)
+    #     not_full_date_df = data[data['trans_date'].isin(not_full_date_list)]
+    #     if not_full_date_df.shape[0] == 0:
+    #         return full_date_df
+    #     not_full_date_df1 = df[df['trans_date'].isin(not_full_date_list)]
+    #     for row in not_full_date_df.itertuples():
+    #         trans_date = getattr(row, 'trans_date')
+    #         trans_amt = getattr(row, 'trans_amt')
+    #         account_balance = getattr(row, 'account_balance', None)
+    #         opponent_name = getattr(row, 'opponent_name')
+    #         exist_df = not_full_date_df1[(not_full_date_df1['trans_amt'] == trans_amt) &
+    #                                      (not_full_date_df1['trans_date'] == trans_date) &
+    #                                      (not_full_date_df1['opponent_name'] == opponent_name)]
+    #         if self.parse_context.parse_task.trans_flow_src_type in [1, '1']:
+    #             exist_df = exist_df[exist_df['account_balance'] == account_balance]
+    #         if exist_df.shape[0] > 0:
+    #             not_full_date_df.drop(getattr(row, 'Index'), inplace=True)
+    #     full_date_df = pd.concat([full_date_df, not_full_date_df], axis=0, sort=False)
+    #     data.loc[~data.index.isin(full_date_df.index.tolist()), 'repeated'] = 1
+    #     return
+
     def _mark_duplicate_data(self):
-        sql = """select * from trans_flow where account_id in (select id from trans_account where account_name='%s' 
-            and id_card_no='%s' and account_no='%s' and bank='%s' and task_no='%s' and create_time > date_sub(now(), interval %d month)) 
-            and repeated = 0 order by id desc""" % \
+        # 1. 获取数据库中的历史数据（保持原有逻辑）
+        sql = """select * from trans_flow where account_id in (select id from trans_account where account_name='%s'
+                and id_card_no='%s' and account_no='%s' and bank='%s' and task_no='%s' and create_time > date_sub(now(), interval %d month))
+                and repeated = 0 order by id desc""" % \
               (self.param.get('cusName'), self.param.get('idNo'), self.param.get('bankAccount'),
                self.param.get('bankName'), self.param.get('taskNo'), MONTH_LIMIT)
-        df = sql_to_df(sql)
-        # 重复标签打上默认值
-        data = self.trans_data
-        data['repeated'] = 0
-        if df.shape[0] == 0:
+        existing_df = sql_to_df(sql)
+
+        # 2. 向量化准备：统一日期格式
+        existing_df['trans_time'] = pd.to_datetime(existing_df['trans_time'])
+        existing_df['trans_date'] = existing_df['trans_time'].dt.date
+
+        data = self.trans_data.copy()
+        data['trans_date'] = pd.to_datetime(data['trans_time']).dt.date
+
+        # 3. 初始化重复标记
+        data['repeated'] = 0  # 默认为新数据
+
+        # 4. 如果没有历史数据，直接返回
+        if existing_df.empty:
             return data
-        df['trans_time'] = pd.to_datetime(df['trans_time'])
-        df['trans_date'] = df['trans_time'].apply(lambda x: x.date())
-        data['trans_date'] = data['trans_time'].apply(lambda x: x.date())
-        full_date_list = df.groupby('account_id')['trans_date'].agg({'min', 'max'})[['min', 'max']].values.tolist()
-        merge_date_list = self.interval_merge(full_date_list)
-        not_full_date_list = []
-        full_date_string = "data[(data['trans_date'] < pd.to_datetime('%s').date()) | " % \
-                           format(merge_date_list[0][0], '%Y-%m-%d')
-        for i in range(len(merge_date_list) - 1):
-            not_full_date_list.extend(merge_date_list[i])
-            temp_str = "((data['trans_date'] > pd.to_datetime('%s').date()) & " \
-                       "(data['trans_date'] < pd.to_datetime('%s').date())) | " % \
-                       (format(merge_date_list[i][1], '%Y-%m-%d'), format(merge_date_list[i + 1][0], '%Y-%m-%d'))
-            full_date_string += temp_str
-        full_date_string += "(data['trans_date'] > pd.to_datetime('%s').date())]" % \
-                            format(merge_date_list[-1][-1], '%Y-%m-%d')
-        not_full_date_list.extend(merge_date_list[-1])
-        full_date_df = eval(full_date_string)
-        not_full_date_df = data[data['trans_date'].isin(not_full_date_list)]
-        if not_full_date_df.shape[0] == 0:
-            return full_date_df
-        not_full_date_df1 = df[df['trans_date'].isin(not_full_date_list)]
-        for row in not_full_date_df.itertuples():
-            trans_date = getattr(row, 'trans_date')
-            trans_amt = getattr(row, 'trans_amt')
-            account_balance = getattr(row, 'account_balance', None)
-            opponent_name = getattr(row, 'opponent_name')
-            exist_df = not_full_date_df1[(not_full_date_df1['trans_amt'] == trans_amt) &
-                                         (not_full_date_df1['trans_date'] == trans_date) &
-                                         (not_full_date_df1['opponent_name'] == opponent_name)]
-            if self.parse_context.parse_task.trans_flow_src_type in [1, '1']:
-                exist_df = exist_df[exist_df['account_balance'] == account_balance]
-            if exist_df.shape[0] > 0:
-                not_full_date_df.drop(getattr(row, 'Index'), inplace=True)
-        full_date_df = pd.concat([full_date_df, not_full_date_df], axis=0, sort=False)
-        data.loc[~data.index.isin(full_date_df.index.tolist()), 'repeated'] = 1
-        return
+
+        # 5. 【关键修复】安全的精确匹配
+        key_cols = ['trans_date', 'trans_amt', 'opponent_name']
+
+        if self.parse_context.parse_task.trans_flow_src_type in [1, '1']:
+            # 条件性添加 account_balance，处理 NaN 情况
+            # 创建一个辅助列，将 NaN 视为相同值进行匹配
+            data['_balance_for_merge'] = data.get('account_balance', pd.Series([None] * len(data))).fillna(
+                '__NULL__')
+            existing_df['_balance_for_merge'] = existing_df.get('account_balance',
+                                                                pd.Series([None] * len(existing_df))).fillna(
+                '__NULL__')
+            key_cols.append('_balance_for_merge')
+
+        # 执行精确匹配（使用 indicator=True 以区分来源）
+        merged_result = data.reset_index().merge(
+            existing_df[key_cols + ['id']],  # 加上 'id' 作为存在标志
+            on=key_cols,
+            how='left',
+            indicator=True
+        )
+
+        # 6. 【安全更新】基于合并结果更新 'repeated' 字段
+        original_indices = merged_result.set_index('index').index
+        data.loc[original_indices[merged_result['_merge'] == 'both'], 'repeated'] = 1
+
+        # 7. 清理临时列
+        if '_balance_for_merge' in data.columns:
+            data.drop(columns=['_balance_for_merge'], inplace=True)
+
+        return data
+
 
     @staticmethod
     def interval_merge(intervals):

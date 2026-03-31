@@ -2,7 +2,7 @@
 # @Author : lixiaobo
 # @File : parse_context.py.py 
 # @Software: PyCharm
-from logger.logger_util import LoggerUtil
+from src.logger.logger_util import LoggerUtil
 
 logger = LoggerUtil().logger(__name__)
 

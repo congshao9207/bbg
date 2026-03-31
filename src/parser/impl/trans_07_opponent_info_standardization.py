@@ -1,7 +1,7 @@
 
 import re
 
-from parser.task_base_executor import TaskBaseExecutor
+from src.parser.task_base_executor import TaskBaseExecutor
 
 
 class TransOpponentInfoStandardization(TaskBaseExecutor):
@@ -28,7 +28,9 @@ class TransOpponentInfoStandardization(TaskBaseExecutor):
         去除交易对手列中不符合规范的列
         :return:
         """
+        print(self.col_mapping())
         string = ''.join([str(_) for _ in self.col_mapping()[opponent_info]])
+        print(string)
         # 删除其中非空唯一值数量低于4的列
         for index in range(-len(self.col_mapping()[opponent_info]), 0):
             col = self.col_mapping()[opponent_info][index]
@@ -58,6 +60,7 @@ class TransOpponentInfoStandardization(TaskBaseExecutor):
         return
 
     def _opinfo_match(self, opponent_info, col_name):
+        print(col_name)
         self._remove_opinfo_col(opponent_info)
         length = len(self.col_mapping()[opponent_info])
         comp = re.compile(r'[\\\"\'＇\s^-]')

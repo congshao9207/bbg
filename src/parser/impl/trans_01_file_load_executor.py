@@ -2,10 +2,10 @@ import re
 
 import pandas as pd
 
-from config.trans_config import MAX_TITLE_NUMBER, TRANS_TIME_PATTERN, \
+from src.config.trans_config import MAX_TITLE_NUMBER, TRANS_TIME_PATTERN, \
     TRANS_AMT_PATTERN, TRANS_BAL_PATTERN, ACCOUNTING_DATE_PATTERN
-from logger.logger_util import LoggerUtil
-from parser.task_base_executor import TaskBaseExecutor
+from src.logger.logger_util import LoggerUtil
+from src.parser.task_base_executor import TaskBaseExecutor
 
 logger = LoggerUtil().logger(__name__)
 
@@ -21,6 +21,7 @@ class TransFileLoadExecutor(TaskBaseExecutor):
         self.read_type = 'xls'
 
     def execute(self):
+        self.parse_context.parse_task.trans_flow_src_type = 1
         self.sheet_name, self.title = self._find_title()
         if self.sheet_name is None or self.sheet_name == '' or self.title is None:
             if self.sheet_name is None:

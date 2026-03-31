@@ -3,7 +3,7 @@
 # @File : builder.py.py 
 # @Software: PyCharm
 from src.component.parse_context import ParseContext
-from model.model import TransParseTask
+from src.model.model import TransParseTask
 
 
 def execute_common(file_path, executors):
