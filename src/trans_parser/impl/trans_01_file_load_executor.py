@@ -5,7 +5,7 @@ import pandas as pd
 from src.config.trans_config import MAX_TITLE_NUMBER, TRANS_TIME_PATTERN, \
     TRANS_AMT_PATTERN, TRANS_BAL_PATTERN, ACCOUNTING_DATE_PATTERN
 from src.logger.logger_util import LoggerUtil
-from src.parser.task_base_executor import TaskBaseExecutor
+from trans_parser.task_base_executor import TaskBaseExecutor
 
 logger = LoggerUtil().logger(__name__)
 

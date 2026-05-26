@@ -3,16 +3,16 @@
 # @File : trans_01_file_load_executor_test.py.py 
 # @Software: PyCharm
 from executors.builder import execute_common
-from src.parser.impl.trans_01_file_load_executor import TransFileLoadExecutor
-from src.parser.impl.trans_02_data_standardization import TransDataStandardization
-from src.parser.impl.trans_03_rectify_executor import RectifyExecutor
-from src.parser.impl.trans_04_title_match_executor import TitleMatchExecutor
-from src.parser.impl.trans_05_time_standardization import TransTimeStandardization
-from src.parser.impl.trans_06_amount_standardization import TransAmountStandardization
-from src.parser.impl.trans_07_opponent_info_standardization import TransOpponentInfoStandardization
-from src.parser.impl.trans_08_other_info_standardization import TransOtherInfoStandardization
-from src.parser.impl.trans_09_verify_authenticity_executor import VerifyAuthenticityExecutor
-# from src.parser.impl.trans_10_raw_data_persistence import TransFlowRawData
+from src.trans_parser.impl.trans_01_file_load_executor import TransFileLoadExecutor
+from src.trans_parser.impl.trans_02_data_standardization import TransDataStandardization
+from src.trans_parser.impl.trans_03_rectify_executor import RectifyExecutor
+from src.trans_parser.impl.trans_04_title_match_executor import TitleMatchExecutor
+from src.trans_parser.impl.trans_05_time_standardization import TransTimeStandardization
+from src.trans_parser.impl.trans_06_amount_standardization import TransAmountStandardization
+from src.trans_parser.impl.trans_07_opponent_info_standardization import TransOpponentInfoStandardization
+from src.trans_parser.impl.trans_08_other_info_standardization import TransOtherInfoStandardization
+from src.trans_parser.impl.trans_09_verify_authenticity_executor import VerifyAuthenticityExecutor
+from src.trans_parser.impl.trans_10_raw_data_persistence import TransFlowRawData
 
 
 # def test_trans_01():
@@ -41,7 +41,7 @@ from src.parser.impl.trans_09_verify_authenticity_executor import VerifyAuthenti
 
 
 def test_trans_04():
-    file_path = r"TK1003018541336788992_1772619227593.xlsx"
+    file_path = r"我的物流公司流水.xlsx"
     executors = [
         TransFileLoadExecutor(),
         TransDataStandardization(),
@@ -52,7 +52,7 @@ def test_trans_04():
         TransOpponentInfoStandardization(),
         TransOtherInfoStandardization(),
         VerifyAuthenticityExecutor(),
-        # TransFlowRawData()
+        TransFlowRawData()
     ]
     import time
     start_time = time.time()
@@ -62,7 +62,7 @@ def test_trans_04():
 
 def test_perf():
     """性能测试，逐个执行器计时"""
-    file_path = r"hnls111.xlsx"
+    file_path = r"我的物流公司流水.xlsx"
     import time
     executors = [
         (TransFileLoadExecutor(), 'TransFileLoadExecutor'),

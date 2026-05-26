@@ -2,7 +2,7 @@
 # @Author : lixiaobo
 # @File : trans_03_data_verify_executor.py 
 # @Software: PyCharm
-from parser.task_base_executor import TaskBaseExecutor
+from trans_parser.task_base_executor import TaskBaseExecutor
 
 
 # 不允许， 方法需要写入class内部（util类型的方法除外）

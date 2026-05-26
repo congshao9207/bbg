@@ -5,10 +5,10 @@
 import re
 
 from src.component.parse_context import COL_MAPPING
-from src.config.trans_config import TRANS_TIME_PATTERN, TRANS_AMT_PATTERN, TRANS_BAL_PATTERN, \
+from config.trans_config import TRANS_TIME_PATTERN, TRANS_AMT_PATTERN, TRANS_BAL_PATTERN, \
     TRANS_OPNAME_PATTERN, TRANS_OPACCT_PATTERN, TRANS_OPBANK_PATTERN, TRANS_CUR_PATTERN, TRANS_CHANNEL_PATTERN, \
     TRANS_TYP_PATTERN, TRANS_USE_PATTERN, TRANS_REMARK_PATTERN, ACCOUNTING_DATE_PATTERN
-from src.parser.task_base_executor import TaskBaseExecutor
+from trans_parser.task_base_executor import TaskBaseExecutor
 
 
 class TitleMatchExecutor(TaskBaseExecutor):

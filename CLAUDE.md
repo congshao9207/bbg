@@ -36,7 +36,7 @@ The application runs on port 8011.
 ### Docker Build
 ```bash
 ./build.sh
-docker build -t trans-parser ./src
+docker build -t trans-trans_parser ./src
 ```
 
 ## Testing

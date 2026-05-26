@@ -3,9 +3,9 @@ import decimal
 import re
 import difflib
 
-from src.logger.logger_util import LoggerUtil
-from src.parser.task_base_executor import TaskBaseExecutor
-from src.config.trans_config import SIMILAR_THRESH
+from logger.logger_util import LoggerUtil
+from trans_parser.task_base_executor import TaskBaseExecutor
+from config.trans_config import SIMILAR_THRESH
 import itertools
 
 logger = LoggerUtil().logger(__name__)

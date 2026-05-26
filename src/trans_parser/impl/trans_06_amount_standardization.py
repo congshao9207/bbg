@@ -1,8 +1,8 @@
 
-from src.config.trans_config import INCOME_PATTERN, OUTCOME_PATTERN
+from config.trans_config import INCOME_PATTERN, OUTCOME_PATTERN
 import re
 
-from src.parser.task_base_executor import TaskBaseExecutor
+from trans_parser.task_base_executor import TaskBaseExecutor
 
 
 class TransAmountStandardization(TaskBaseExecutor):

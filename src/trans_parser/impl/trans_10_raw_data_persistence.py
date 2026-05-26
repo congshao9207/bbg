@@ -3,11 +3,11 @@ import json
 
 from logger.logger_util import LoggerUtil
 from model.model import transform_class_str, transform_flow_str
-from parser.task_base_executor import TaskBaseExecutor
+from trans_parser.task_base_executor import TaskBaseExecutor
 from config.db_config import sql_to_df
 from config.trans_config import MONTH_LIMIT
 import pandas as pd
-from parser.impl.trans_single_portrait_label import TransSingleLabel
+from trans_parser.impl.trans_single_portrait_label import TransSingleLabel
 
 logger = LoggerUtil().logger(__name__)
 
@@ -89,7 +89,7 @@ class TransFlowRawData(TaskBaseExecutor):
         existing_df['trans_time'] = pd.to_datetime(existing_df['trans_time'])
         existing_df['trans_date'] = existing_df['trans_time'].dt.date
 
-        data = self.trans_data.copy()
+        data = self.trans_data
         data['trans_date'] = pd.to_datetime(data['trans_time']).dt.date
 
         # 3. 初始化重复标记
@@ -174,16 +174,15 @@ class TransFlowRawData(TaskBaseExecutor):
         return trans_account.id
 
     def execute(self):
-        self.df = self.trans_data
-        logger.info("----打印日志  trans_data.shape: %s" % str(self.df.shape))
+        # self.df = self.trans_data
         parse_task = self.parse_context.parse_task
         self.param = json.loads(parse_task.req_raw_data)
         query_data_array = self.param.get('queryData', [])
 
         account_id = self._save_account_data()
         self.parse_context.account_id = account_id
-
-        self._mark_duplicate_data()
+        self.df = self._mark_duplicate_data()
+        logger.info("----打印日志  trans_data.shape: %s" % str(self.df.shape))
         # 原始数据列名
         col_list = ['trans_time', 'opponent_name', 'trans_amt', 'account_balance', 'currency',
                     'opponent_account_no', 'opponent_account_bank', 'trans_channel', 'trans_type',

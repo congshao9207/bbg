@@ -1,5 +1,5 @@
-from src.config.column_mapping import TITLE_RECTIFY, CHAR_MAPPING
-from src.parser.task_base_executor import TaskBaseExecutor
+from config.column_mapping import TITLE_RECTIFY, CHAR_MAPPING
+from trans_parser.task_base_executor import TaskBaseExecutor
 import pandas as pd
 import re
 

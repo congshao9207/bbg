@@ -1,7 +1,7 @@
 
 import re
 
-from src.parser.task_base_executor import TaskBaseExecutor
+from trans_parser.task_base_executor import TaskBaseExecutor
 
 
 class TransOpponentInfoStandardization(TaskBaseExecutor):

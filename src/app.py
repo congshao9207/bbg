@@ -85,7 +85,7 @@ def health_check():
         检查当前应用的健康情况
         :return:
         """
-    msg = "Trans parser is running!" + str(os.getpid())
+    msg = "Trans trans_parser is running!" + str(os.getpid())
     return RespEntity.response(0, msg)
 
 

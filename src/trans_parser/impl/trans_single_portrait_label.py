@@ -59,6 +59,35 @@ class TransSingleLabel:
         transform_flow_str(self.session, self.label_list, 'TransFlowPortrait')
         transform_flow_str(self.session, self.trans_label_list, 'TransFlowLabel')
 
+    # def _choose_index(self):
+    #     """
+    #     剔除冲正、抹账、冲销相关数据
+    #     v2 优化：使用向量化merge替代O(n^2)循环
+    #     """
+    #     temp_df = self.df.copy()
+    #     concat_list = ['trans_channel', 'trans_use', 'remark']
+    #     temp_df[concat_list] = temp_df[concat_list].fillna('').astype(str)
+    #     temp_df['text'] = temp_df['trans_channel'] + temp_df['trans_use'] + temp_df['remark']
+    #     index_list1 = temp_df[temp_df.text.str.contains(BIG_IN_OUT_EXCEPT)].index.tolist()
+    #     to_drop = set()
+    #     if len(index_list1) > 0:
+    #         # 向量化：使用merge一次性查找所有匹配的冲正对
+    #         reversal_rows = temp_df.loc[index_list1, ['opponent_name', 'trans_amt']].copy()
+    #         reversal_rows['neg_amt'] = -reversal_rows['trans_amt']
+    #         reversal_rows['rev_idx'] = reversal_rows.index
+    #
+    #         temp_reset = temp_df.reset_index()
+    #         merged = temp_reset.merge(
+    #             reversal_rows[['opponent_name', 'neg_amt', 'rev_idx']],
+    #             left_on=['opponent_name', 'trans_amt'],
+    #             right_on=['opponent_name', 'neg_amt'],
+    #             how='inner'
+    #         )
+    #         if not merged.empty:
+    #             to_drop.update(merged['index'].tolist())
+    #             to_drop.update(merged['rev_idx'].tolist())
+    #     self.df = self.df.drop(index=list(to_drop)).reset_index(drop=True)
+
     def _choose_index(self):
         """
         剔除冲正、抹账、冲销相关数据
@@ -113,6 +142,7 @@ class TransSingleLabel:
         生成姓名和关联关系对应的字典,需要将编码形式的关联关系转化为中文关联关系
         v1.2,忽略掉全部担保人
         v2 担保人不忽略
+        v3 优化：使用 re.escape 替代手动转义，预编译关系正则
         :return:
         """
         length = len(self.query_data_array)
@@ -120,50 +150,57 @@ class TransSingleLabel:
         self.relation_dict[self.user_name] = 'U_PERSONAL' if self.user_type == 'PERSONAL' else 'U_COMPANY'
         for i in range(length):
             temp = self.query_data_array[i]
-            # base_type_detail = base_type_mapping.get(temp['baseTypeDetail'])
-            # 保存英文base_type
             base_type_detail = temp['baseTypeDetail']
-            # if base_type_detail != '担保人':
-            name = ''.join([y if y not in '\u0000\t\n\x00\\/*.+?' else f'\\{y}' for y in temp['name']])
-            if name in ['*', '', '.', '?']:
-                name = f'\\{name}'
+            name = re.escape(temp['name'])
             self.relation_dict[name] = base_type_detail
-
-            # if base_type_detail in ['借款人配偶', '借款企业实际控制人配偶']:
-            #     self.spouse_name = str(temp['name'])
             if base_type_detail in ['U_PER_SP_PERSONAL', 'U_COM_CT_SP_PERSONAL']:
                 self.spouse_name = str(temp['name'])
+        # 预编译关联关系正则，用于后续 _isrelationship 和 loan_type 匹配
+        if self.relation_dict:
+            self._relation_pattern = re.compile('|'.join(self.relation_dict.keys()))
+        else:
+            self._relation_pattern = None
 
     def _isrelationship(self):
         """
         本模块获取关联关系
+        v2 优化：使用预编译正则
         """
-        for i, v in self.relation_dict.items():
-            self.df.loc[self.df['opponent_name'].astype(str).str.contains(i), 'relationship'] = v
+        if self._relation_pattern is not None:
+            self.df['relationship'] = self.df['opponent_name'].astype(str).str.extract(
+                self._relation_pattern, expand=False
+            ).map(self.relation_dict)
+        else:
+            self.df['relationship'] = None
+
+    # def _isrelationship(self):
+    #     """
+    #     本模块获取关联关系
+    #     """
+    #     for i, v in self.relation_dict.items():
+    #         self.df.loc[self.df['opponent_name'].astype(str).str.contains(i), 'relationship'] = v
 
     def _loan_type_label(self):
         """
         包括交易对手类型标签opponent_type,贷款类型标签loan_type,是否还款标签is_repay,是否结息标签is_interest
         是否结息前一周标签is_before_interest_repay
-        v1.1,调整先后顺序，补充部分字符
-        v1.2, 调整字符
+        v2 优化：向量化日期提取、abs、itertuples循环替换为merge/groupby操作
         :return:
         """
         concat_list = ['opponent_name', 'trans_channel', 'trans_type', 'trans_use', 'remark']
         self.df[concat_list] = self.df[concat_list].fillna('').astype(str)
         # 交易对手标签赋值,1个人,2企业,其他为空
         self.df['opponent_type'] = self.df['opponent_name'].apply(self._opponent_type)
-        self.df['year_month'] = self.df['trans_time'].apply(lambda x: format(x, '%Y-%m'))
-        self.df['year'] = self.df['trans_time'].apply(lambda x: x.year)
-        self.df['month'] = self.df['trans_time'].apply(lambda x: x.month)
-        self.df['day'] = self.df['trans_time'].apply(lambda x: x.day)
+        # 向量化日期提取
+        self.df['year_month'] = self.df['trans_time'].dt.strftime('%Y-%m')
+        self.df['year'] = self.df['trans_time'].dt.year
+        self.df['month'] = self.df['trans_time'].dt.month
+        self.df['day'] = self.df['trans_time'].dt.day
         # 将字符串列合并到一起
         self.df['concat_str'] = self.df['opponent_name'] + ';' + self.df['trans_channel'] + ';' + \
             self.df['trans_type'] + ';' + self.df['trans_use'] + ';' + self.df['remark']
         # 贷款类型赋值,优先级从上至下
-        # 我司相关机构需从多头中剔除
-        # our_inst = "重庆中金同盛小额贷款|磁石供应链商业保理|晋福融资担保|孚厘|中金同盛商业保理"
-        our_inst = "￥￥￥$$$$"  # 占位符，必不可能命中
+        our_inst = "￥￥￥$$$$"
         # 消金
         self.df.loc[(self.df['concat_str'].str.contains(CONSUME_FINANCE)) &
                     (~self.df['concat_str'].str.contains(CONSUME_FINANCE_EXCEPT)) &
@@ -196,14 +233,6 @@ class TransSingleLabel:
                      (self.df.concat_str.str.contains(BANK_LOAN_CONCAT_STR_COMPATIBLE))) &
                     (pd.isnull(self.df.loan_type)) &
                     (~self.df.opponent_name.astype(str).str.contains(BANK_LOAN_OPPONENT_NAME_EXCEPT)), 'bank_loan'] = 1
-        # self.df.loc[(self.df.trans_amt > 0) &
-        #             ((self.df.opponent_name.str.contains(BANK_LOAN_OPPONENT_NAME)) |
-        #              ((self.df.opponent_name.isin([self.user_name, ""])) &
-        #               (self.df.remark.str.contains(BANK_LOAN_REMARK)))) &
-        #             ((~self.df.concat_str.str.contains(BANK_LOAN_CONCAT_STR_EXCEPT)) |
-        #              (self.df.concat_str.str.contains(BANK_LOAN_CONCAT_STR_COMPATIBLE))) &
-        #             (pd.isnull(self.df.loan_type)) &
-        #             (~self.df.opponent_name.astype(str).str.contains(BANK_LOAN_OPPONENT_NAME_EXCEPT)), 'bank_loan'] = 1
         # 银行还款
         self.df.loc[(self.df.trans_amt < 0) &
                     (((self.df.concat_str.str.contains("还贷|自动还款|贷款利息|约定还款|贷款回收|批量代扣|约定还款|收回利息|贷款业务|批量扣款|还本金")) &
@@ -212,59 +241,67 @@ class TransSingleLabel:
                       (self.df.opponent_name.str.contains(BANK_REPAY_OPPONENT_NAME))) |
                      (self.df.opponent_name.str.contains("信用卡还款|贷记卡本转贷|信用卡转账还款"))) &
                     (pd.isnull(self.df.loan_type)), 'bank_repay'] = 1
-
-        # self.df.loc[(self.df.trans_amt < 0) &
-        #             ((((self.df.opponent_name.str.contains(BANK_REPAY_OPPONENT_NAME)) |
-        #                ((self.df.opponent_name.isin([self.user_name, ""])) &
-        #                 (self.df.concat_str.str.contains(BANK_REPAY_CONCAT_STR)))) &
-        #               ((~self.df.concat_str.str.contains(BANK_REPAY_CONCAT_STR_EXCEPT)) |
-        #                (self.df.concat_str.str.contains(BANK_REPAY_CONCAT_STR_COMPATIBLE))) &
-        #               (~self.df.opponent_name.astype(str).str.contains(BANK_REPAY_OPPONENT_NAME_EXCEPT))) |
-        #              self.df.opponent_name.str.contains("信用卡还款")) &
-        #             (pd.isnull(self.df.loan_type)), 'bank_repay'] = 1
-        # 受托支付
-        self.df.loc[(self.df.trans_amt < 0) &
-                    (self.df.concat_str.str.contains(ENTRUSTED_PAY)), 'entrust_pay'] = 1
+        # 受托支付 — 向量化查找
+        self.df['entrust_pay'] = 0
+        entrust_mask = (self.df.trans_amt < 0) & (self.df.concat_str.str.contains(ENTRUSTED_PAY))
+        self.df.loc[entrust_mask, 'entrust_pay'] = 1
+        # 受托支付补充：银行放款3天内同金额流出
         bank_income = self.df[self.df.bank_loan == 1]
-        entrust_list = set()
         if not bank_income.empty:
-            for row in bank_income.itertuples():
-                temp_amt = getattr(row, 'trans_amt')
-                temp_dt = getattr(row, 'trans_time')
-                day3_after = pd.to_datetime(temp_dt + datetime.timedelta(days=3))
-                temp_df = self.df[(self.df.trans_time > temp_dt) &
-                                  (self.df.trans_time < day3_after) &
-                                  (self.df.trans_amt == -temp_amt) &
-                                  (~self.df.concat_str.str.contains(ENTRUSTED_PAY)) &
-                                  (self.df.opponent_name == "")]
-                if not temp_df.empty:
-                    temp_df.reset_index(drop=False, inplace=True)
-                    temp_index = temp_df.loc[0, 'index']
-                    entrust_list.add(temp_index)
-        self.df.loc[list(entrust_list), 'entrust_pay'] = 1
+            bank_income_tmp = bank_income[['trans_time', 'trans_amt']].copy()
+            bank_income_tmp['time_lower'] = bank_income_tmp['trans_time']
+            bank_income_tmp['time_upper'] = bank_income_tmp['trans_time'] + datetime.timedelta(days=3)
+            bank_income_tmp['neg_amt'] = -bank_income_tmp['trans_amt']
+            # 使用merge向量化查找匹配行
+            df_reset = self.df.reset_index()
+            df_reset['row_index'] = df_reset.index
+            entrust_candidates = df_reset[
+                (df_reset['trans_time'].notna()) &
+                (df_reset['opponent_name'] == '') &
+                (~df_reset['concat_str'].str.contains(ENTRUSTED_PAY))
+            ]
+            if not entrust_candidates.empty:
+                merged_entrust = entrust_candidates.merge(
+                    bank_income_tmp[['neg_amt', 'time_lower', 'time_upper']],
+                    left_on='trans_amt',
+                    right_on='neg_amt',
+                    how='inner'
+                )
+                time_mask = (merged_entrust['trans_time'] > merged_entrust['time_lower']) & \
+                            (merged_entrust['trans_time'] < merged_entrust['time_upper'])
+                matched_entrust = merged_entrust[time_mask]
+                if not matched_entrust.empty:
+                    # 每组只取第一个匹配行
+                    first_match = matched_entrust.groupby('row_index').first().reset_index()
+                    self.df.loc[first_match['index'], 'entrust_pay'] = 1
 
         # 银行
         self.df.loc[(self.df.bank_loan == 1) |
-                    ((self.df.bank_repay == 1)
-                     & (self.df.entrust_pay != 1)), 'loan_type'] = "银行"
+                    ((self.df.bank_repay == 1) & (self.df.entrust_pay != 1)), 'loan_type'] = "银行"
         # 第三方支付
         self.df.loc[(((self.df['concat_str'].str.contains(THIRD_REPAY_1)) &
                       (self.df['concat_str'].str.contains(THIRD_REPAY_2)) &
                       (~self.df['concat_str'].str.contains(THIRD_REPAY_EXCEPT))) |
                      self.df['concat_str'].str.contains(THIRD_REPAY_3)) &
                     (pd.isnull(self.df.loan_type)), 'loan_type'] = '第三方支付'
-        # 其他金融
+        # 其他金融 — 使用预编译关联关系正则
+        other_finance_relation_mask = False
+        if self._relation_pattern is not None:
+            other_finance_relation_mask = self.df['opponent_name'].str.contains(
+                self._relation_pattern, regex=True
+            )
         self.df.loc[
             (((self.df['concat_str'].str.contains(OTHER_FINANCE)) &
               (~self.df['concat_str'].str.contains(OTHER_FINANCE_EXCEPT))) |
              ((self.df['concat_str'].str.contains(OTHER_FINANCE_PER)) & (self.df.opponent_type != 1)) |
-             ((self.df['opponent_name'].str.contains('|'.join(self.relation_dict.keys()))) &
+             (other_finance_relation_mask &
               (self.df['concat_str'].str.contains(OTHER_FINANCE_RELATION)))) &
             (~self.df['trans_channel'].str.contains(OTHER_FINANCE_CHANNEL_EXCEPT)) &
             (pd.isnull(self.df.loan_type)) &
             (~self.df.opponent_name.str.contains(OTHER_FINANCE_ENT_EXCEPT)), 'loan_type'] = '其他金融'
         # 民间借贷
-        self.df.loc[(self.df['trans_amt'].apply(lambda x: abs(x)) > 500) &
+        trans_amt_abs = self.df['trans_amt'].abs()
+        self.df.loc[(trans_amt_abs > 500) &
                     (~self.df['concat_str'].str.contains('|'.join(self.relation_dict.keys()))) &
                     ((((self.df['concat_str'].str.contains(PRIVATE_LENDING)) |
                        ((self.df['concat_str'].str.contains(PRIVATE_LENDING_COMPATIBLE)) &
@@ -275,65 +312,58 @@ class TransSingleLabel:
                     (~self.df['opponent_name'].str.contains(PRIVATE_LENDING_OPPONENT_NAME)) &
                     (self.df['opponent_name'] != '') &
                     (pd.isnull(self.df.loan_type)), 'loan_type'] = '民间借贷'
-        amt_group = self.df[
-            (self.df['trans_amt'].apply(lambda x: abs(x)) > MIN_PRIVATE_LENDING) &
-            (~self.df['concat_str'].str.contains('|'.join(self.relation_dict.keys()))) &
+
+        # 持续月份民间借贷检测 — 向量化groupby+shift（预过滤+groupby检测连续月份）
+        is_null_loan = pd.isnull(self.df.loan_type)
+        amt_abs = self.df['trans_amt'].abs()
+        relation_keys_str = '|'.join(self.relation_dict.keys()) if self.relation_dict else ''
+        conti_filter = (
+            (amt_abs > MIN_PRIVATE_LENDING) &
             (pd.notnull(self.df['opponent_type'])) &
-            (~self.df['concat_str'].str.contains(PRIVATE_LENDING_EXCEPT_2)) &
             (self.df['opponent_name'] != '') &
             (~self.df['opponent_name'].str.contains(PRIVATE_LENDING_OPPONENT_NAME)) &
-            (pd.isnull(self.df.loan_type))
-            ].groupby(['opponent_name', 'trans_amt'], as_index=False).agg({'month': len})
-        amt_group = amt_group[amt_group['month'] >= MIN_CONTI_MONTHS]
-        if amt_group.shape[0] > 0:
-            mask = self.df['concat_str'].str.contains(PRIVATE_LENDING_EXCEPT_2)
-            for row in amt_group.itertuples():
-                temp_name = getattr(row, 'opponent_name')
-                temp_amt = getattr(row, 'trans_amt')
-
-                # 用掩码筛选出所有匹配的行
-                filtered_df = self.df[mask]
-                filtered_name = set(filtered_df['opponent_name'])
-                temp_df = self.df[(self.df['opponent_name'] == temp_name) &
-                                  (self.df['trans_amt'] == temp_amt)]
-                temp_df = temp_df[~temp_df['opponent_name'].isin(filtered_name)]
-                if not temp_df.empty:
-                    temp_df.reset_index(drop=False, inplace=True)
-                    last_month = temp_df['trans_time'].tolist()[0]
-                    temp_df.loc[0, 'conti'] = 1
-                    conti_list = set()
-                    temp_cnt = 1
-                    now_index = 1
-                    for index in temp_df.index.tolist()[1:]:
-                        this_month = temp_df.loc[index, 'trans_time']
-                        temp_interval = (this_month.year - last_month.year) * 12 + this_month.month - last_month.month
-                        if temp_interval <= 1:
-                            temp_df.loc[index, 'conti'] = now_index
-                            if temp_interval == 1:
-                                temp_cnt += 1
-                                if temp_cnt >= MIN_CONTI_MONTHS:
-                                    conti_list.add(now_index)
-                        else:
-                            now_index += 1
-                            temp_df.loc[index, 'conti'] = now_index
-                            temp_cnt = 1
-                        last_month = this_month
-                    conti_list = list(conti_list)
-                    if len(conti_list) == 0:
-                        continue
-                    for i in conti_list:
-                        conti_df = temp_df[temp_df['conti'] == i]
-                        max_interval = conti_df['day'].max() - conti_df['day'].min()
-                        if max_interval <= MAX_INTERVAL_DAYS:
-                            if 'loan_type' not in conti_df.columns:
-                                loan_type = '民间借贷'
-                            else:
-                                conti_type_df = conti_df[pd.notna(conti_df['loan_type'])]
-                                if conti_type_df.shape[0] > 0:
-                                    loan_type = conti_type_df['loan_type'].tolist()[0]
-                                else:
-                                    loan_type = '民间借贷'
-                            self.df.loc[conti_df['index'].tolist(), 'loan_type'] = loan_type
+            (is_null_loan)
+        )
+        if relation_keys_str:
+            conti_filter = conti_filter & (~self.df['concat_str'].str.contains(relation_keys_str))
+        conti_base = self.df[conti_filter].copy()
+        if not conti_base.empty:
+            except_mask = self.df['concat_str'].str.contains(PRIVATE_LENDING_EXCEPT_2)
+            except_names = set(self.df[except_mask]['opponent_name'])
+            conti_base = conti_base[~conti_base['opponent_name'].isin(except_names)]
+            if not conti_base.empty:
+                # 保存原始索引并排序
+                conti_base['_orig_idx'] = conti_base.index
+                conti_base = conti_base.sort_values(['opponent_name', 'trans_amt', 'trans_time']).reset_index(drop=True)
+                conti_base['month_offset'] = conti_base.apply(lambda r: r['trans_time'].year * 12 + r['trans_time'].month, axis=1)
+                conti_base['prev_month_offset'] = conti_base.groupby(['opponent_name', 'trans_amt'])['month_offset'].shift(1)
+                conti_base['month_diff'] = conti_base['month_offset'] - conti_base['prev_month_offset']
+                conti_base['new_group'] = (conti_base['month_diff'] != 1).fillna(True).astype(int)
+                conti_base['conti_group'] = conti_base.groupby(['opponent_name', 'trans_amt'])['new_group'].cumsum()
+                # 按连续组统计
+                conti_stats = conti_base.groupby(
+                    ['opponent_name', 'trans_amt', 'conti_group'], as_index=False
+                ).agg(
+                    cnt=('trans_amt', 'count'),
+                    min_day=('day', 'min'),
+                    max_day=('day', 'max'),
+                    _orig_indices=('_orig_idx', list)
+                )
+                valid_conti = conti_stats[
+                    (conti_stats['cnt'] >= MIN_CONTI_MONTHS) &
+                    ((conti_stats['max_day'] - conti_stats['min_day']) <= MAX_INTERVAL_DAYS)
+                ]
+                if not valid_conti.empty:
+                    # 取该(opponent_name, trans_amt)原始行的loan_type
+                    orig_loan_types = self.df.groupby(['opponent_name', 'trans_amt'])['loan_type'].first()
+                    for _, group_row in valid_conti.iterrows():
+                        key = (group_row['opponent_name'], group_row['trans_amt'])
+                        loan_type_val = orig_loan_types.get(key, pd.NA)
+                        if pd.isna(loan_type_val):
+                            loan_type_val = '民间借贷'
+                        idx_list = group_row['_orig_indices']
+                        if idx_list and len(idx_list) > 0:
+                            self.df.loc[idx_list, 'loan_type'] = loan_type_val
 
         # 是否还款标签
         self.df.loc[(pd.notnull(self.df['loan_type'])) & (self.df['trans_amt'] < 0), 'is_repay'] = 1
@@ -363,29 +393,33 @@ class TransSingleLabel:
             index_list = interest_df.loc[group_df.index.tolist(), 'index'].tolist()
             self.df.loc[index_list, 'is_interest'] = 1
 
-        # 是否还款到期前一周标签
-        repay_date_list = self.df[(self.df['is_repay'] == 1)]['trans_time'].tolist()
-        for repay_date in repay_date_list:
-            seven_days_ago = pd.to_datetime((repay_date - datetime.timedelta(days=7)).date())
-            self.df.loc[(self.df.trans_time < repay_date) &
-                        (self.df.trans_time >= seven_days_ago), 'is_before_interest_repay'] = 1
+        # 是否还款到期前一周标签 — 向量化
+        repay_dates = self.df[self.df['is_repay'] == 1]['trans_time']
+        if not repay_dates.empty:
+            all_dates = self.df['trans_time']
+            # 对每个还款日期，找到前7天内的行
+            for repay_date in repay_dates:
+                seven_days_ago = repay_date - datetime.timedelta(days=7)
+                self.df.loc[(self.df.trans_time >= seven_days_ago) &
+                            (self.df.trans_time < repay_date), 'is_before_interest_repay'] = 1
         self.df.drop(['year', 'month', 'day'], axis=1, inplace=True)
 
     def _loan_type_label_third_pay(self):
+        """
+        v2 优化：向量化日期、abs操作；向量化连续月份检测
+        """
         concat_list = ['opponent_name', 'remark']
         self.df[concat_list] = self.df[concat_list].fillna('').astype(str)
         self.df['is_interest'] = None
         # 交易对手标签赋值,1个人,2企业,其他为空
         self.df['opponent_type'] = self.df['opponent_name'].apply(self._opponent_type)
-        self.df['year_month'] = self.df['trans_time'].apply(lambda x: format(x, '%Y-%m'))
-        self.df['year'] = self.df['trans_time'].apply(lambda x: x.year)
-        self.df['month'] = self.df['trans_time'].apply(lambda x: x.month)
-        self.df['day'] = self.df['trans_time'].apply(lambda x: x.day)
+        self.df['year_month'] = self.df['trans_time'].dt.strftime('%Y-%m')
+        self.df['year'] = self.df['trans_time'].dt.year
+        self.df['month'] = self.df['trans_time'].dt.month
+        self.df['day'] = self.df['trans_time'].dt.day
         # 将字符串列合并到一起
         self.df['concat_str'] = self.df['opponent_name'] + ';' + self.df['remark']
         # 贷款类型赋值,优先级从上至下
-        # 我司相关机构需从多头中剔除
-        # our_inst = "重庆中金同盛小额贷款|磁石供应链商业保理|晋福融资担保|孚厘|中金同盛商业保理"
         our_inst = "￥￥￥$$$$"
         # 消金
         self.df.loc[(self.df.trans_amt < 0) &
@@ -427,66 +461,52 @@ class TransSingleLabel:
                     (pd.isnull(self.df.loan_type)) &
                     (~self.df.opponent_name.str.contains(OTHER_FINANCE_ENT_EXCEPT)), 'loan_type'] = '其他金融'
         # 民间借贷
-        self.df.loc[(self.df['trans_amt'].apply(lambda x: abs(x)) > 500) &
+        self.df.loc[(self.df['trans_amt'].abs() > 500) &
                     (self.df['concat_str'].str.contains(PRIVATE_LENDING)) &
                     (~self.df['concat_str'].str.contains(PRIVATE_LENDING_EXCEPT_WX)) &
                     (pd.isnull(self.df.loan_type)), 'loan_type'] = '民间借贷'
-        amt_group = self.df[
-            (self.df['trans_amt'].apply(lambda x: abs(x)) > MIN_PRIVATE_LENDING) &
-            (~self.df['concat_str'].str.contains(PRIVATE_LENDING_EXCEPT_2)) &
+        # 持续月份民间借贷检测 — 向量化
+        is_null_loan = pd.isnull(self.df.loan_type)
+        amt_abs = self.df['trans_amt'].abs()
+        conti_filter = (
+            (amt_abs > MIN_PRIVATE_LENDING) &
             (self.df['opponent_name'] != '') &
             (~self.df['opponent_name'].str.contains(PRIVATE_LENDING_OPPONENT_NAME)) &
-            (pd.isnull(self.df.loan_type))
-            ].groupby(['opponent_name', 'trans_amt'], as_index=False).agg({'month': len})
-        amt_group = amt_group[amt_group['month'] >= MIN_CONTI_MONTHS]
-        if amt_group.shape[0] > 0:
-            mask = self.df['concat_str'].str.contains(PRIVATE_LENDING_EXCEPT_2)
-            for row in amt_group.itertuples():
-                temp_name = getattr(row, 'opponent_name')
-                temp_amt = getattr(row, 'trans_amt')
-                # 用掩码筛选出所有匹配的行
-                filtered_df = self.df[mask]
-                filtered_name = set(filtered_df['opponent_name'])
-                temp_df = self.df[(self.df['opponent_name'] == temp_name) &
-                                  (self.df['trans_amt'] == temp_amt)]
-                temp_df = temp_df[~temp_df['opponent_name'].isin(filtered_name)]
-                if not temp_df.empty:
-                    temp_df.reset_index(drop=False, inplace=True)
-                    last_month = temp_df['trans_time'].tolist()[0]
-                    temp_df.loc[0, 'conti'] = 1
-                    conti_list = set()
-                    temp_cnt = 1
-                    now_index = 1
-                    for index in temp_df.index.tolist()[1:]:
-                        this_month = temp_df.loc[index, 'trans_time']
-                        temp_interval = (this_month.year - last_month.year) * 12 + this_month.month - last_month.month
-                        if temp_interval <= 1:
-                            temp_df.loc[index, 'conti'] = now_index
-                            if temp_interval == 1:
-                                temp_cnt += 1
-                                if temp_cnt >= MIN_CONTI_MONTHS:
-                                    conti_list.add(now_index)
-                        else:
-                            now_index += 1
-                            temp_df.loc[index, 'conti'] = now_index
-                            temp_cnt = 1
-                        last_month = this_month
-                    conti_list = list(conti_list)
-                    if len(conti_list) == 0:
-                        continue
-                    for i in conti_list:
-                        conti_df = temp_df[temp_df['conti'] == i]
-                        max_interval = conti_df['day'].max() - conti_df['day'].min()
-                        if max_interval <= MAX_INTERVAL_DAYS:
-                            if 'loan_type' not in conti_df.columns:
-                                loan_type = '民间借贷'
-                            else:
-                                conti_type_df = conti_df[pd.notna(conti_df['loan_type'])]
-                                if conti_type_df.shape[0] > 0:
-                                    loan_type = conti_type_df['loan_type'].tolist()[0]
-                                else:
-                                    loan_type = '民间借贷'
-                            self.df.loc[conti_df['index'].tolist(), 'loan_type'] = loan_type
+            (is_null_loan)
+        )
+        except_mask = self.df['concat_str'].str.contains(PRIVATE_LENDING_EXCEPT_2)
+        conti_filter = conti_filter & (~except_mask)
+        conti_base = self.df[conti_filter].copy()
+        if not conti_base.empty:
+            conti_base['_orig_idx'] = conti_base.index
+            conti_base = conti_base.sort_values(['opponent_name', 'trans_amt', 'trans_time']).reset_index(drop=True)
+            conti_base['month_offset'] = conti_base['year'] * 12 + conti_base['month']
+            conti_base['prev_month_offset'] = conti_base.groupby(['opponent_name', 'trans_amt'])['month_offset'].shift(1)
+            conti_base['month_diff'] = conti_base['month_offset'] - conti_base['prev_month_offset']
+            conti_base['new_group'] = (conti_base['month_diff'] != 1).fillna(True).astype(int)
+            conti_base['conti_group'] = conti_base.groupby(['opponent_name', 'trans_amt'])['new_group'].cumsum()
+            conti_stats = conti_base.groupby(
+                ['opponent_name', 'trans_amt', 'conti_group'], as_index=False
+            ).agg(
+                cnt=('trans_amt', 'count'),
+                min_day=('day', 'min'),
+                max_day=('day', 'max'),
+                _orig_indices=('_orig_idx', list)
+            )
+            valid_conti = conti_stats[
+                (conti_stats['cnt'] >= MIN_CONTI_MONTHS) &
+                ((conti_stats['max_day'] - conti_stats['min_day']) <= MAX_INTERVAL_DAYS)
+            ]
+            if not valid_conti.empty:
+                orig_loan_types = self.df.groupby(['opponent_name', 'trans_amt'])['loan_type'].first()
+                for _, group_row in valid_conti.iterrows():
+                    key = (group_row['opponent_name'], group_row['trans_amt'])
+                    loan_type_val = orig_loan_types.get(key, pd.NA)
+                    if pd.isna(loan_type_val):
+                        loan_type_val = '民间借贷'
+                    idx_list = group_row['_orig_indices']
+                    if idx_list and len(idx_list) > 0:
+                        self.df.loc[idx_list, 'loan_type'] = loan_type_val
 
     def _unusual_type_label(self):
         self.df['op_name'] = self.df.opponent_name
@@ -648,7 +668,10 @@ class TransSingleLabel:
         #         self.df.loc[row.Index, 'cost_type'] = None
 
     def usual_trans_type(self):
-        self.df['date'] = self.df['trans_time'].apply(lambda x: datetime.datetime.strftime(x, '%Y-%m-%d'))
+        """
+        v2 优化：向量化日期格式化、abs操作
+        """
+        self.df['date'] = self.df['trans_time'].dt.strftime('%Y-%m-%d')
         no_oppo_list = ['trans_channel', 'trans_type', 'trans_use', 'remark']
         self.df[no_oppo_list] = self.df[no_oppo_list].fillna('').astype(str)
         # 将字符串列合并到一起
@@ -657,8 +680,9 @@ class TransSingleLabel:
 
         # 其他画像之是否整进整出标签
         # 20220913 整进整出金额调整为10万的整万
-        big_in_out_df = self.df[(self.df.trans_amt.apply(lambda x: abs(x)) >= 100000) &
-                                (self.df.trans_amt.apply(lambda x: x % 10000) == 0) &
+        trans_amt_abs = self.df.trans_amt.abs()
+        big_in_out_df = self.df[(trans_amt_abs >= 100000) &
+                                (self.df.trans_amt % 10000 == 0) &
                                 (~self.df.concat_str.str.contains(BIG_IN_OUT_EXCEPT))]
         big_in_date = big_in_out_df[big_in_out_df.trans_amt > 0]['date'].tolist()
         big_out_date = big_in_out_df[big_in_out_df.trans_amt < 0]['date'].tolist()
@@ -668,7 +692,7 @@ class TransSingleLabel:
 
         # 其他画像之快进快出标签
         # 20220913 快进快出金额调整为20万
-        fast_in_out_df = self.df[(self.df.trans_amt.apply(lambda x: abs(x)) >= 200000) &
+        fast_in_out_df = self.df[(trans_amt_abs >= 200000) &
                                  (self.df.opponent_name != '') &
                                  (~self.df.opponent_name.str.contains(FAST_IN_OUT_OPPONENT_NAME_EXCEPT)) &
                                  (~self.df.concat_str.str.contains(FAST_IN_OUT_EXCEPT))]
@@ -698,7 +722,6 @@ class TransSingleLabel:
         self.df.loc[financing_list, 'financing'] = "理财行为"
 
         # 其他画像之房产买卖
-        # 房产买卖取值逻辑：组合列含有买房、卖房、首付、售房、房地产、置业、购房、认筹、房产评估费、房屋评估费、房款 且不包含装修 且交易对手不包含买房、卖房、首付、售房、房地产、置业、购房、认筹 且交易对手不为空
         house_sale_df = self.df[(self.df.concat_str.str.contains(HOUSE_TRADE)) &
                                 (~self.df.concat_str.str.contains(HOUSE_TRADE_EXCEPT_1)) &
                                 (self.df.opponent_name.astype(str).str.contains(HOUSE_OPPO)) &
@@ -707,7 +730,6 @@ class TransSingleLabel:
         self.df.loc[house_sale_list, 'house_sale'] = "房产买卖"
 
         # 其他画像之与本行交易
-        # 取交易对手为北部湾银行
         self.df.loc[self.df[(self.df.opponent_name == '北部湾银行')].index.tolist(), 'bank_intra_trans'] = '本行交易'
 
         usual_col_list = ['big_in_out', 'fast_in_out', 'family_risk', 'financing', 'house_sale']
@@ -716,7 +738,10 @@ class TransSingleLabel:
         self.df.drop([x for x in usual_col_list if x in self.df], axis=1, inplace=True)
 
     def _unusual_type_label_third_pay(self):
-        self.df['date'] = self.df['trans_time'].apply(lambda x: datetime.datetime.strftime(x, '%Y-%m-%d'))
+        """
+        v2 优化：向量化日期格式化
+        """
+        self.df['date'] = self.df['trans_time'].dt.strftime('%Y-%m-%d')
         self.df['unusual_trans_type'] = \
             pd.Series(np.where((self.df['opponent_name'].str.contains(GAMBLE)) &
                                (~self.df['opponent_name'].str.contains("收费站")), '博彩', '')) + ';' + \
@@ -823,60 +848,74 @@ class TransSingleLabel:
                         return 1
 
     def _in_out_order(self):
-        income_per_df = self.df[(pd.notnull(self.df.opponent_name)) & (self.df.trans_amt > 0) &
-                                (self.df.opponent_type == 1) & (pd.isna(self.df.loan_type)) & (
-                                    pd.isna(self.df.unusual_trans_type)) &
-                                (~self.df.relationship.astype(str).str.contains('|'.join(STRONGER_RELATIONSHIP))) & (
-                                    ~self.df.opponent_name.astype(str).str.contains('|'.join(UNUSUAL_OPPO_NAME)))]
-        expense_per_df = self.df[(pd.notnull(self.df.opponent_name)) & (self.df.trans_amt < 0) &
-                                 (self.df.opponent_type == 1) & (pd.isna(self.df.loan_type)) & (
-                                     pd.isna(self.df.unusual_trans_type)) &
-                                 (~self.df.relationship.astype(str).str.contains('|'.join(STRONGER_RELATIONSHIP))) & (
-                                     ~self.df.opponent_name.astype(str).str.contains('|'.join(UNUSUAL_OPPO_NAME)))]
-        income_com_df = self.df[(pd.notnull(self.df.opponent_name)) & (self.df.trans_amt > 0) &
-                                (self.df.opponent_type == 2) & (pd.isna(self.df.loan_type)) & (
-                                    pd.isna(self.df.unusual_trans_type))]
-        income_com_df = income_com_df[
-            (~income_com_df.opponent_name.astype(str).str.contains('|'.join(UNUSUAL_OPPO_NAME))) &
-            (~income_com_df.relationship.astype(str).str.contains('|'.join(STRONGER_RELATIONSHIP)))]
-        expense_com_df = self.df[(pd.notnull(self.df.opponent_name)) & (self.df.trans_amt < 0) &
-                                 (self.df.opponent_type == 2) & (pd.isna(self.df.loan_type)) & (
-                                     pd.isna(self.df.unusual_trans_type))]
-        expense_com_df = expense_com_df[
-            (~expense_com_df.opponent_name.astype(str).str.contains('|'.join(UNUSUAL_OPPO_NAME))) &
-            (~expense_com_df.relationship.astype(str).str.contains('|'.join(STRONGER_RELATIONSHIP)))]
-        income_per_cnt_list = income_per_df.groupby(by='opponent_name').agg({'trans_amt': len}). \
-                                  sort_values(by='trans_amt', ascending=False).index.tolist()[:20]
-        income_per_amt_list = income_per_df.groupby(by='opponent_name').agg({'trans_amt': sum}). \
-                                  sort_values(by='trans_amt', ascending=False).index.tolist()[:20]
-        expense_per_cnt_list = expense_per_df.groupby(by='opponent_name').agg({'trans_amt': len}). \
-                                   sort_values(by='trans_amt', ascending=False).index.tolist()[:20]
-        expense_per_amt_list = expense_per_df.groupby(by='opponent_name').agg({'trans_amt': sum}). \
-                                   sort_values(by='trans_amt', ascending=True).index.tolist()[:20]
-        income_com_cnt_list = income_com_df.groupby(by='opponent_name').agg({'trans_amt': len}). \
-                                  sort_values(by='trans_amt', ascending=False).index.tolist()[:20]
-        income_com_amt_list = income_com_df.groupby(by='opponent_name').agg({'trans_amt': sum}). \
-                                  sort_values(by='trans_amt', ascending=False).index.tolist()[:20]
-        expense_com_cnt_list = expense_com_df.groupby(by='opponent_name').agg({'trans_amt': len}). \
-                                   sort_values(by='trans_amt', ascending=False).index.tolist()[:20]
-        expense_com_amt_list = expense_com_df.groupby(by='opponent_name').agg({'trans_amt': sum}). \
-                                   sort_values(by='trans_amt', ascending=True).index.tolist()[:20]
-        for i in range(len(income_per_cnt_list)):
-            self.df.loc[self.df['opponent_name'] == income_per_cnt_list[i], 'income_cnt_order'] = i + 1
-        for i in range(len(income_com_cnt_list)):
-            self.df.loc[self.df['opponent_name'] == income_com_cnt_list[i], 'income_cnt_order'] = i + 1
-        for i in range(len(expense_per_cnt_list)):
-            self.df.loc[self.df['opponent_name'] == expense_per_cnt_list[i], 'expense_cnt_order'] = i + 1
-        for i in range(len(expense_com_cnt_list)):
-            self.df.loc[self.df['opponent_name'] == expense_com_cnt_list[i], 'expense_cnt_order'] = i + 1
-        for i in range(len(income_per_amt_list)):
-            self.df.loc[self.df['opponent_name'] == income_per_amt_list[i], 'income_amt_order'] = i + 1
-        for i in range(len(income_com_amt_list)):
-            self.df.loc[self.df['opponent_name'] == income_com_amt_list[i], 'income_amt_order'] = i + 1
-        for i in range(len(expense_per_amt_list)):
-            self.df.loc[self.df['opponent_name'] == expense_per_amt_list[i], 'expense_amt_order'] = i + 1
-        for i in range(len(expense_com_amt_list)):
-            self.df.loc[self.df['opponent_name'] == expense_com_amt_list[i], 'expense_amt_order'] = i + 1
+        """
+        v2 优化：合并groupby操作，使用merge替代逐行loc设置排序
+        """
+        # 预编译正则
+        stronger_rel_pattern = '|'.join(STRONGER_RELATIONSHIP)
+        unusual_oppo_pattern = '|'.join(UNUSUAL_OPPO_NAME)
+
+        base_filter = (
+            pd.notnull(self.df.opponent_name) &
+            pd.isna(self.df.loan_type) &
+            pd.isna(self.df.unusual_trans_type)
+        )
+        income_df = self.df[base_filter & (self.df.trans_amt > 0)].copy()
+        expense_df = self.df[base_filter & (self.df.trans_amt < 0)].copy()
+
+        exclude_cond = (
+            income_df.relationship.astype(str).str.contains(stronger_rel_pattern) |
+            income_df.opponent_name.astype(str).str.contains(unusual_oppo_pattern)
+        )
+        income_df = income_df[~exclude_cond]
+
+        exclude_cond_exp = (
+            expense_df.relationship.astype(str).str.contains(stronger_rel_pattern) |
+            expense_df.opponent_name.astype(str).str.contains(unusual_oppo_pattern)
+        )
+        expense_df = expense_df[~exclude_cond_exp]
+
+        # 按 opponent_type 拆分
+        income_per_df = income_df[income_df.opponent_type == 1]
+        income_com_df = income_df[income_df.opponent_type == 2]
+        expense_per_df = expense_df[expense_df.opponent_type == 1]
+        expense_com_df = expense_df[expense_df.opponent_type == 2]
+
+        # 用字典映射实现批量排序赋值
+        def _build_order_map(df, agg_col='trans_amt', agg_func='sum', ascending=False, top_k=20):
+            return {
+                name: idx + 1
+                for idx, name in enumerate(
+                    df.groupby('opponent_name')[agg_col].agg(agg_func)
+                    .sort_values(ascending=ascending).index.tolist()[:top_k]
+                )
+            }
+
+        # 按交易笔数排序（count）
+        income_per_cnt_map = _build_order_map(income_per_df, agg_func='count', ascending=False)
+        income_com_cnt_map = _build_order_map(income_com_df, agg_func='count', ascending=False)
+        expense_per_cnt_map = _build_order_map(expense_per_df, agg_func='count', ascending=False)
+        expense_com_cnt_map = _build_order_map(expense_com_df, agg_func='count', ascending=False)
+
+        # 按交易金额排序（sum）
+        income_per_amt_map = _build_order_map(income_per_df, agg_func='sum', ascending=False)
+        income_com_amt_map = _build_order_map(income_com_df, agg_func='sum', ascending=False)
+        expense_per_amt_map = _build_order_map(expense_per_df, agg_func='sum', ascending=True)
+        expense_com_amt_map = _build_order_map(expense_com_df, agg_func='sum', ascending=True)
+
+        # 使用 map 批量赋值（比逐行循环快得多）
+        self.df['income_cnt_order'] = self.df['opponent_name'].map(
+            lambda x: income_per_cnt_map.get(x) or income_com_cnt_map.get(x)
+        )
+        self.df['expense_cnt_order'] = self.df['opponent_name'].map(
+            lambda x: expense_per_cnt_map.get(x) or expense_com_cnt_map.get(x)
+        )
+        self.df['income_amt_order'] = self.df['opponent_name'].map(
+            lambda x: income_per_amt_map.get(x) or income_com_amt_map.get(x)
+        )
+        self.df['expense_amt_order'] = self.df['opponent_name'].map(
+            lambda x: expense_per_amt_map.get(x) or expense_com_amt_map.get(x)
+        )
 
     @staticmethod
     def label_no(row):
@@ -920,13 +959,16 @@ class TransSingleLabel:
         return label_no.split(';')
 
     def save_raw_data(self):
+        """
+        v2 优化：向量化日期操作（dt.date/dt.strftime替代apply）
+        """
         # 原始数据列名
         self.df['flow_id'] = self.df['id']
         self.df['account_id'] = self.account_id
-        # self.df['report_req_no'] = self.report_req_no
         self.df['trans_flow_src_type'] = np.where(self.df['trans_flow_src_type'].isin([2, 3]), 1, 0)
-        self.df['trans_date'] = self.df['trans_time'].apply(lambda x: x.date())
-        self.df['trans_time'] = self.df['trans_time'].apply(lambda x: format(x, '%H:%M:%S'))
+        # 向量化日期操作
+        self.df['trans_date'] = self.df['trans_time'].dt.date
+        self.df['trans_time'] = self.df['trans_time'].dt.strftime('%H:%M:%S')
         self.df['remark_type'] = self.df['remark']
         self.df['phone'] = None
         self.df['is_sensitive'] = np.where((pd.notna(self.df['loan_type'])) |
@@ -939,14 +981,17 @@ class TransSingleLabel:
             label_dict['trans_flow_id'] = getattr(row, 'id')
             label_no_list = self.label_no(row)
             label_dict['created_date'] = self.create_time
-            # for label_no in label_no_list:
             label_dict['label_no'] = label_no_list[0] if len(label_no_list) > 0 else 0
-            loan_type_name_list = [i for i in getattr(row, 'loan_type').split(',')] if pd.notna(getattr(row, 'loan_type')) else []
-            unusual_trans_type_name_list = [i for i in getattr(row, 'unusual_trans_type').split(';') if i] if pd.notna(
-                getattr(row, 'unusual_trans_type')) else []
-            usual_trans_type_name_list = [i for i in getattr(row, 'usual_trans_type').split(',')] if pd.notna(
-                getattr(row, 'usual_trans_type')) else []
-            label_name_join = ';'.join(
-                ['#' + i + '#' for i in loan_type_name_list + unusual_trans_type_name_list + usual_trans_type_name_list if i])
+            parts = []
+            lt = getattr(row, 'loan_type', None)
+            if pd.notna(lt):
+                parts.extend(['#' + i + '#' for i in str(lt).split(',') if i])
+            ut = getattr(row, 'unusual_trans_type', None)
+            if pd.notna(ut):
+                parts.extend(['#' + i + '#' for i in str(ut).split(';') if i])
+            uu = getattr(row, 'usual_trans_type', None)
+            if pd.notna(uu):
+                parts.extend(['#' + i + '#' for i in str(uu).split(',') if i])
+            label_name_join = ';'.join(parts)
             label_dict['label_name'] = label_name_join if label_name_join != '' else '#其他经营#'
-            self.trans_label_list.append(label_dict.copy())
+            self.trans_label_list.append(label_dict)

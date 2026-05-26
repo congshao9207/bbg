@@ -1,10 +1,10 @@
 
-from src.config.trans_config import DTTIME_PATTERN, TIME_PATTERN, DATE_PATTERN, TIME_S_PATTERN, SHORT_DATE_PATTERN
+from config.trans_config import DTTIME_PATTERN, TIME_PATTERN, DATE_PATTERN, TIME_S_PATTERN, SHORT_DATE_PATTERN
 import pandas as pd
 import datetime
 import re
 
-from src.parser.task_base_executor import TaskBaseExecutor
+from src.trans_parser.task_base_executor import TaskBaseExecutor
 
 # 预编译正则表达式，避免重复编译
 DTTIME_PAT_COMPILED = re.compile(DTTIME_PATTERN)

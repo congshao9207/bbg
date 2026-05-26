@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cd C:\\\\Users\\\\Magfin\\\\Desktop\\\\bbg\\\\trans-parser:*)"
+      "Bash(cd C:\\\\Users\\\\Magfin\\\\Desktop\\\\bbg\\\\trans-parser:*)",
+      "Bash(head:*)",
+      "Bash(cd /c/Users/Magfin/Desktop/bbg/trans-parser && python -c \"\nimport ast\nwith open\\('src/trans_parser/impl/trans_single_portrait_label.py', encoding='utf-8'\\) as f:\n    code = f.read\\(\\)\nast.parse\\(code\\)\nprint\\('Syntax OK'\\)\n# Count lines\nlines = code.split\\('\\\\n'\\)\nprint\\(f'Total lines: {len\\(lines\\)}'\\)\n\" 2>&1)"
     ]
   }
 }
