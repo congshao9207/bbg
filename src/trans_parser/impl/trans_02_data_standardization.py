@@ -2,7 +2,7 @@ import re
 
 import pandas as pd
 
-from src.config.trans_config import DTTIME_PATTERN, DATE_PATTERN, AMT_PATTERN, IGNORE_PATTERN, \
+from config.trans_config import DTTIME_PATTERN, DATE_PATTERN, AMT_PATTERN, IGNORE_PATTERN, \
     INCOME_PATTERN, OUTCOME_PATTERN, SHORT_DATE_PATTERN
 from trans_parser.task_base_executor import TaskBaseExecutor
 

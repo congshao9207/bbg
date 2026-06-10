@@ -115,27 +115,6 @@ class TransSingleLabel:
                     raise Exception(e)
         self.df = self.df.drop(index=list(to_drop)).reset_index(drop=True)
 
-    # def _choose_index(self):
-    #     """
-    #     剔除冲正、抹账相关数据
-    #     """
-    #     temp_df = self.df
-    #     concat_list = ['trans_channel', 'trans_use', 'remark']
-    #     temp_df[concat_list] = temp_df[concat_list].fillna('').astype(str)
-    #     temp_df['text'] = temp_df['trans_channel'] + temp_df['trans_use'] + temp_df['remark']
-    #     index_list1 = temp_df[temp_df.text.str.contains(BIG_IN_OUT_EXCEPT)].index.tolist()
-    #     index_list2 = []
-    #     for left_i in index_list1:
-    #         row1 = temp_df.loc[left_i, :]
-    #         if left_i > 0:
-    #             row2 = temp_df.loc[left_i - 1, :]
-    #         else:
-    #             continue
-    #         if getattr(row1, 'opponent_name') == getattr(row2, 'opponent_name') and \
-    #                 getattr(row1, 'trans_amt') + getattr(row2, 'trans_amt') == 0:
-    #             index_list2.append(left_i - 1)
-    #             index_list2.append(left_i)
-    #     self.df = self.df.drop(index=index_list2).reset_index(drop=True)
 
     def _relationship_dict(self):
         """
@@ -157,7 +136,9 @@ class TransSingleLabel:
                 self.spouse_name = str(temp['name'])
         # 预编译关联关系正则，用于后续 _isrelationship 和 loan_type 匹配
         if self.relation_dict:
-            self._relation_pattern = re.compile('|'.join(self.relation_dict.keys()))
+            # 修改点：在 join 的结果外层加上括号 ()
+            pattern_str = '|'.join(self.relation_dict.keys())
+            self._relation_pattern = re.compile(f'({pattern_str})')
         else:
             self._relation_pattern = None
 

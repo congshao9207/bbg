@@ -4,6 +4,7 @@
 # @Software: PyCharm
 import os
 import threading
+import multiprocessing
 import time
 import traceback
 
@@ -22,13 +23,15 @@ from util.magfin_redis import trans_parse_queue
 logger = LoggerUtil().logger(__name__)
 
 
-class TransParseRouting(threading.Thread):
+# class TransParseRouting(threading.Thread):
+class TransParseRouting(multiprocessing.Process):
 
     def __init__(self):
-        super().__init__()
+        # super().__init__()
+        super().__init__(daemon=True)
         self.loop_count = 0
-        self.session_factory = sessionmaker(bind=engine)
-        self.pid = None
+        self.session_factory = None
+        # self.pid = None
 
     def increment_loop_count(self):
         self.loop_count = self.loop_count + 1
@@ -36,7 +39,8 @@ class TransParseRouting(threading.Thread):
             logger.info("Routing-pid: %s, thread: %s, loop_count:%d", str(os.getpid()), threading.current_thread().getName(), self.loop_count)
 
     def run(self):
-        self.pid = str(os.getpid())
+        self.session_factory = sessionmaker(bind=engine)
+        # self.pid = str(os.getpid())
         logger.info("Routine begin:pid: %s, thread: %s", str(self.pid), threading.current_thread().getName())
         try:
             while True:

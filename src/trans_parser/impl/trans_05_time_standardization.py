@@ -4,7 +4,7 @@ import pandas as pd
 import datetime
 import re
 
-from src.trans_parser.task_base_executor import TaskBaseExecutor
+from trans_parser.task_base_executor import TaskBaseExecutor
 
 # 预编译正则表达式，避免重复编译
 DTTIME_PAT_COMPILED = re.compile(DTTIME_PATTERN)
@@ -33,6 +33,8 @@ def dttime_apply(time):
         temp = temp[:14]
         try:
             if DTTIME_PAT_COMPILED.match(temp):
+                # 20251106080000
+                # 20251107470000 这种数据原来报错
                 result = datetime.datetime.strptime(temp, '%Y%m%d%H%M%S')
         except (ValueError, TypeError, OverflowError):
             result = None

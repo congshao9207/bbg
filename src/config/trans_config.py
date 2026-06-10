@@ -10,13 +10,13 @@ import current
 PDF_DECRYPT_FLAG = os.getenv("PDF_DECRYPT_FLAG", "OFF")
 WORK_SPACE = os.getenv("TRANS_WORK_SPACE", current.current_path(".."))
 
-REDIS_HOST = os.getenv("REDIS_HOST", "61.128.28.104")
+REDIS_HOST = os.getenv("REDIS_HOST", "192.168.1.9")
 REDIS_PORT = os.getenv("REDIS_PORT", 6379)
-REDIS_MAX_CONN = os.getenv("REDIS_MAX_CONN", 100)
-REDIS_PWD = os.getenv("REDIS_PWD", "")
-REDIS_DB = os.getenv("REDIS_DB", "13")
+REDIS_MAX_CONN = os.getenv("REDIS_MAX_CONN", 1000)
+REDIS_PWD = os.getenv("REDIS_PWD", "magfin2018")
+REDIS_DB = os.getenv("REDIS_DB", "0")
 
-EUREKA_SERVER = os.getenv('EUREKA_SERVER', 'http://61.128.28.103:8761/eureka/')
+EUREKA_SERVER = os.getenv('EUREKA_SERVER', 'http://192.168.1.27:8031/eureka/')
 SPEC_OPT_TOKEN = os.getenv('SPEC_OPT_TOKEN', "X5ZSAvPLt8C2f3zS5Rw7QZKPbzGFai7i")
 DAFE_SERVER = os.getenv('DAFE_SERVER', 'http://61.128.2.93:22530/apigw/appinfo/register')
 
@@ -69,7 +69,9 @@ TRANS_REMARK_PATTERN = r'(摘要|说明|附言|付吉|备注|[Dd]escription|个�
 # 标准日期时间格式
 #   时间+日期格式,年份20开头,00-29结尾,即2000年到2029年,月份01-12,日期01-31(暂时不区分大小月),小时00-23,分钟00-59
 #   秒钟00-59,或者excel表示的日期,即40000-49999之间的数字(可以包含小数部分)
-DTTIME_PATTERN = r"^20[012]\d(0[1-9]|1[012])(0[1-9]|[12]\d|3[01])([01]\d|2[0-3])([0-5]\d){2}|^4\d{4}\d*[1-9]+\d*"
+# DTTIME_PATTERN = r"^20[012]\d(0[1-9]|1[012])(0[1-9]|[12]\d|3[01])([01]\d|2[0-3])([0-5]\d){2}|^4\d{4}\d*[1-9]+\d*"
+DTTIME_PATTERN = r"^20[012]\d(1[012]|0?[1-9])([12]\d|3[01]|0?[1-9])([01]\d|2[0-3])([0-5]\d){2}$"
+
 # 标准日期格式
 #   日期格式,仅有年份,月份,日期,含义同上
 DATE_PATTERN = r'^20[012]\d(0[1-9]|1[012])(0[1-9]|[12]\d|3[01])|^4\d{4}'
