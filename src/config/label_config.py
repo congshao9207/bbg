@@ -253,7 +253,7 @@ BANK_LOAN_OPPONENT_NAME_EXCEPT = r"0|1|2|3|4|5|6|7|8|9|网上商城|/|:|：|\\"
 # 银行放款备注关键字
 BANK_LOAN_REMARK = "放款|贷款|信贷|放贷|贷记卡贷转本"
 # 银行放款剔除关键字
-BANK_LOAN_CONCAT_STR_EXCEPT = "贴现放款|消费|转存|POS|pos|转支|电子商务|工程|工资|验证|退回|待清算|代发|缴费|津贴"
+BANK_LOAN_CONCAT_STR_EXCEPT = "贴现放款|消费|转存|POS|pos|转支|电子商务|工程|工资|验证|退回|待清算|代发|缴费|津贴|提现|清算|平台商户"
 # 银行放款兼容关键字
 BANK_LOAN_CONCAT_STR_COMPATIBLE = "消费贷|快贷"
 

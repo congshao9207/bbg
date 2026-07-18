@@ -1,5 +1,5 @@
 # coding: utf-8
-from sqlalchemy import Column, DECIMAL, DateTime, String, Date, Time
+from sqlalchemy import Column, DECIMAL, DateTime, String, Date, Time, text
 from sqlalchemy.dialects.mysql import BIGINT, INTEGER, LONGBLOB
 from sqlalchemy.ext.declarative import declarative_base
 import pandas as pd
@@ -20,7 +20,7 @@ def transform_class_str(params, class_name):
     return value
 
 
-def transform_flow_str(session, params, class_name):
+def transform_flow_str(session, params, class_name, return_ids=False):
     f = eval(class_name + "()")
     col_list = [x for x in dir(f) if not x.startswith("_") and x not in ['id', 'metadata', 'registry']]
     start = f"insert into {f.__tablename__}({','.join(col_list)}) values "
@@ -33,8 +33,9 @@ def transform_flow_str(session, params, class_name):
             else:
                 vals.append('null')
         return f"({','.join(vals)})"
-    insert_list = [start + ','.join([sql_values(params[j]) for j in range(i, min(i + 1000, len(params)))])
-                   for i in range(0, len(params), 1000)]
+    batch_size = 1000
+    insert_list = [start + ','.join([sql_values(params[j]) for j in range(i, min(i + batch_size, len(params)))])
+                   for i in range(0, len(params), batch_size)]
     try:
         for ins in insert_list:
             session.execute(ins)
@@ -42,6 +43,15 @@ def transform_flow_str(session, params, class_name):
     except Exception as e:
         session.rollback()
         return e
+
+    if return_ids:
+        # 获取最后一批插入的第一个自增 ID
+        result = session.execute(text("SELECT LAST_INSERT_ID()"))
+        last_batch_first_id = result.scalar()
+        total_rows = len(params)
+        last_batch_start = (total_rows // batch_size) * batch_size
+        first_id = last_batch_first_id - last_batch_start
+        return list(range(first_id, first_id + total_rows))
 
 
 class OcrTask(Base):

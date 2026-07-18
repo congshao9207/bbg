@@ -190,9 +190,7 @@ class TransFlowRawData(TaskBaseExecutor):
                     'opponent_account_no', 'opponent_account_bank', 'trans_channel', 'trans_type',
                     'trans_use', 'remark', 'repeated', 'verif_label']
         varchar64_list = ['opponent_account_no', 'opponent_account_bank', 'trans_channel', 'trans_type']
-        index = 0
         for row in self.df.itertuples():
-            index = index + 1
             flow_dict = dict()
             flow_dict['account_id'] = account_id
             flow_dict['out_req_no'] = self.parse_context.parse_task.out_req_no
@@ -203,23 +201,22 @@ class TransFlowRawData(TaskBaseExecutor):
                     flow_dict[col] = str(flow_dict[col])[:64]
             flow_dict['create_time'] = self.create_time
             flow_dict['update_time'] = self.create_time
-            # 将原始数据落库
-            # role = transform_class_str(flow_dict, 'TransFlow')
             self.raw_list.append(flow_dict)
         logger.info("save_raw_data begin")
-        e = transform_flow_str(self.session, self.raw_list, 'TransFlow')
-        # self.session.bulk_save_objects(self.raw_list)
-        # self.session.add_all(self.raw_list)
+        all_ids = transform_flow_str(self.session, self.raw_list, 'TransFlow', return_ids=True)
         logger.info("save_raw_data end")
-        if e is not None:
-            err_msg = '导入数据库失败,失败原因:%s' % str(e)
+        if isinstance(all_ids, Exception):
+            err_msg = '导入数据库失败,失败原因:%s' % str(all_ids)
             logger.error(err_msg)
             self.mark_err('导入数据库失败')
         else:
-            # 重新从数据库中拉取不重复的数据，目的是获取flow_id
-            sql = f"select * from trans_flow where account_id = {account_id} and repeated = 0"
-            label_df = sql_to_df(sql)
-            if label_df.shape[0] > 0:
+            # 从内存中获取非重复数据的 flow_id，避免重新查询数据库
+            repeated_arr = self.df['repeated'].tolist()
+            non_dup_positions = [i for i, r in enumerate(repeated_arr) if r == 0]
+            if non_dup_positions:
+                non_dup_ids = [all_ids[i] for i in non_dup_positions]
+                label_df = self.df[self.df['repeated'] == 0].copy().reset_index(drop=True)
+                label_df['id'] = non_dup_ids
                 label_df['trans_flow_src_type'] = self.parse_context.parse_task.trans_flow_src_type
                 label = TransSingleLabel(self.session, account_id, label_df, self.param.get('cusName'),
                                          self.param.get('cusType'), query_data_array)

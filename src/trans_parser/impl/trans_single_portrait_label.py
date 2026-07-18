@@ -899,14 +899,13 @@ class TransSingleLabel:
         )
 
     @staticmethod
-    def label_no(row):
-        trans_amt = getattr(row, 'trans_amt')
-        loan_type = getattr(row, 'loan_type') if pd.notna(getattr(row, 'loan_type')) else ''
-        unusual_trans_type = getattr(row, 'unusual_trans_type') if pd.notna(getattr(row, 'unusual_trans_type')) else ''
-        usual_trans_type = getattr(row, 'usual_trans_type') if pd.notna(getattr(row, 'usual_trans_type')) else ''
-        relationship = getattr(row, 'relationship') if pd.notna(getattr(row, 'relationship')) else ''
-        is_interest = getattr(row, 'is_interest') if pd.notna(getattr(row, 'is_interest')) else 0
-        cost_type = getattr(row, 'cost_type') if pd.notna(getattr(row, 'cost_type', None)) else ''
+    def label_no(trans_amt, relationship, loan_type, unusual_trans_type, usual_trans_type, is_interest, cost_type):
+        loan_type = loan_type if pd.notna(loan_type) else ''
+        unusual_trans_type = unusual_trans_type if pd.notna(unusual_trans_type) else ''
+        usual_trans_type = usual_trans_type if pd.notna(usual_trans_type) else ''
+        relationship = relationship if pd.notna(relationship) else ''
+        is_interest = is_interest if pd.notna(is_interest) else 0
+        cost_type = cost_type if pd.notna(cost_type) else ''
         if trans_amt > 0:
             if relationship != '':
                 label_no = '01' + RELATIONSHIP_LABEL.get(relationship, '010105')
@@ -957,22 +956,34 @@ class TransSingleLabel:
         self.df['create_time'] = self.create_time
         self.df['update_time'] = self.create_time
         self.label_list = self.df.to_dict('records')
-        for row in self.df.itertuples():
-            label_dict = dict()
-            label_dict['trans_flow_id'] = getattr(row, 'id')
-            label_no_list = self.label_no(row)
-            label_dict['created_date'] = self.create_time
+
+        # 预提取列数据，避免 itertuples namedtuple 构造开销
+        ids = self.df['id'].tolist()
+        trans_amts = self.df['trans_amt'].tolist()
+        relationships = self.df['relationship'].tolist()
+        loan_types = self.df['loan_type'].tolist()
+        unusual_types = self.df['unusual_trans_type'].tolist()
+        usual_types = self.df['usual_trans_type'].tolist()
+        is_interests = self.df['is_interest'].tolist()
+        cost_types = self.df['cost_type'].tolist()
+
+        self.trans_label_list = []
+        for i in range(len(self.df)):
+            label_dict = {'trans_flow_id': ids[i], 'created_date': self.create_time}
+            label_no_list = self.label_no(trans_amts[i], relationships[i], loan_types[i],
+                                          unusual_types[i], usual_types[i], is_interests[i], cost_types[i])
             label_dict['label_no'] = label_no_list[0] if len(label_no_list) > 0 else 0
+
             parts = []
-            lt = getattr(row, 'loan_type', None)
+            lt = loan_types[i]
             if pd.notna(lt):
-                parts.extend(['#' + i + '#' for i in str(lt).split(',') if i])
-            ut = getattr(row, 'unusual_trans_type', None)
+                parts.extend(['#' + x + '#' for x in str(lt).split(',') if x])
+            ut = unusual_types[i]
             if pd.notna(ut):
-                parts.extend(['#' + i + '#' for i in str(ut).split(';') if i])
-            uu = getattr(row, 'usual_trans_type', None)
+                parts.extend(['#' + x + '#' for x in str(ut).split(';') if x])
+            uu = usual_types[i]
             if pd.notna(uu):
-                parts.extend(['#' + i + '#' for i in str(uu).split(',') if i])
+                parts.extend(['#' + x + '#' for x in str(uu).split(',') if x])
             label_name_join = ';'.join(parts)
             label_dict['label_name'] = label_name_join if label_name_join != '' else '#其他经营#'
             self.trans_label_list.append(label_dict)
